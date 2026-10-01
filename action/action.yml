@@ -52,6 +52,8 @@ runs:
       run: |
         pip install git+https://github.com/grep999/mcp-audit@${{ inputs.version }}
 
+    # Scan step ALWAYS succeeds: it produces the report and sets outputs, so the
+    # caller can read verdict/findings even when the gate below fails.
     - name: Run mcp-audit
       id: audit
       shell: bash
@@ -62,26 +64,30 @@ runs:
         [[ "${{ inputs.commit-state }}" == "true" ]] && FLAGS+=(--commit-state)
         report_dir="${RUNNER_TEMP:-/tmp}/mcp-audit"
         mkdir -p "$report_dir"
-        set +e
-        mcp-audit scan "${{ inputs.path }}" "${FLAGS[@]}" > "$report_dir/report.json" 2>&1
-        code=$?
-        set -e
-        verdict=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['verdict'])")
-        findings=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['total_findings'])")
+        mcp-audit scan "${{ inputs.path }}" "${FLAGS[@]}" > "$report_dir/report.json" 2>&1 || true
+        verdict=$(python3 -c "import json;print(json.load(open('$report_dir/report.json'))['summary']['verdict'])")
+        findings=$(python3 -c "import json;print(json.load(open('$report_dir/report.json'))['summary']['total_findings'])")
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
         echo "findings=$findings" >> "$GITHUB_OUTPUT"
         echo "report-path=$report_dir/report.json" >> "$GITHUB_OUTPUT"
         echo "Verdict: $verdict ($findings findings)"
         # Emit GH annotations
         python3 -c "import json;r=json.load(open('$report_dir/report.json'));[print('::%s file=.mcp.json,title=mcp-audit::[%s] %s: %s'%('error' if f['severity'] in ('critical','high') else 'warning',f.get('category'),f.get('server'),f.get('message'))) for f in r.get('findings',[]) if f.get('severity') in ('critical','high','medium')]" || true
-        # Gate: fail if scanner verdict doesn't match the threshold.
-        fail_on="${{ inputs.fail-on }}"
-        case "$fail_on" in
-          critical) [[ "$verdict" == "review" || "$verdict" == "pass" ]] && code=0 ;;
-          high)     [[ "$verdict" == "pass" ]] && code=0 ;;
-          review)   code=0 ;;
+
+    # Separate gate step: this is the only thing that exits non-zero, so the
+    # action's declared outputs are already published by the time it runs.
+    - name: Enforce gate
+      shell: bash
+      run: |
+        set -euo pipefail
+        verdict="${{ steps.audit.outputs.verdict }}"
+        case "${{ inputs.fail-on }}" in
+          critical) [[ "$verdict" == "review" || "$verdict" == "pass" ]] && exit 0 ;;
+          high)     [[ "$verdict" == "pass" ]] && exit 0 ;;
+          review)   exit 0 ;;
         esac
-        exit $code
+        echo "::error title=mcp-audit::Audit verdict '$verdict' meets fail-on threshold '${{ inputs.fail-on }}'"
+        exit 1
 
     - name: Upload report
       if: always()

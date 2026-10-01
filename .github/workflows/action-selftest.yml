@@ -1,7 +1,3 @@
-# Self-test: run the PUBLIC action (grep999/mcp-audit/action@v0.1.0) against
-# this repo's known-CVE fixture. The action MUST fail the step (that is the
-# gate working); we invert it with continue-on-error so the workflow itself is
-# green while asserting the gate fired.
 name: mcp-audit action self-test
 
 on:
@@ -18,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Expected to FAIL (exit 1) because the fixture has a critical CVE.
+      # Expected to FAIL (exit 1): the fixture has a critical CVE.
       - name: Run published mcp-audit action (expected to gate)
         id: audit
         continue-on-error: true
@@ -27,13 +23,22 @@ jobs:
           path: tests/fixtures/bad
           fail-on: high
 
-      - name: Assert the gate fired
+      - name: Assert the gate fired and the report is the correct contract
+        uses: actions/download-artifact@v4
+        with:
+          name: mcp-audit-report
+          path: ./mcp-audit-report
+
+      - name: Verify verdict + CVE from the artifact
         shell: bash
         run: |
           set -euo pipefail
-          verdict="${{ steps.audit.outputs.verdict }}"
-          findings="${{ steps.audit.outputs.findings }}"
-          echo "verdict=$verdict findings=$findings"
+          test "${{ steps.audit.outcome }}" = "failure" \
+            || { echo "FAIL: action did not gate a known-CVE fixture"; exit 1; }
+          report=./mcp-audit-report/report.json
+          test -f "$report" || { echo "FAIL: report artifact missing"; exit 1; }
+          verdict=$(python3 -c "import json;print(json.load(open('$report'))['summary']['verdict'])")
+          cves=$(python3 -c "import json;print(','.join(sorted({f['cve'] for f in json.load(open('$report'))['findings'] if f.get('cve')})))")
+          echo "verdict=$verdict cves=$cves"
           test "$verdict" = "fail" || { echo "FAIL: expected verdict=fail, got $verdict"; exit 1; }
-          test "${{ steps.audit.outcome }}" = "failure" || { echo "FAIL: action did not gate"; exit 1; }
-          echo "OK: published action gated a known-CVE fixture (verdict=$verdict, $findings findings)"
+          echo "OK: published action gated a known-CVE fixture (verdict=$verdict, cves=$cves)"

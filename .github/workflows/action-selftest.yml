@@ -1,6 +1,7 @@
 # Self-test: run the PUBLIC action (grep999/mcp-audit/action@v0.1.0) against
-# this repo's own fixture. Proves the published install path works on a real
-# runner: pip install git+...@v0.1.0 -> mcp-audit scan -> verdict + gate.
+# this repo's known-CVE fixture. The action MUST fail the step (that is the
+# gate working); we invert it with continue-on-error so the workflow itself is
+# green while asserting the gate fired.
 name: mcp-audit action self-test
 
 on:
@@ -17,15 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The published, tagged action — the exact thing a third party would use.
-      - name: Run published mcp-audit action against known-CVE fixture
+      # Expected to FAIL (exit 1) because the fixture has a critical CVE.
+      - name: Run published mcp-audit action (expected to gate)
         id: audit
+        continue-on-error: true
         uses: grep999/mcp-audit/action@v0.1.0
         with:
-          path: tests/fixtures
+          path: tests/fixtures/bad
           fail-on: high
 
-      - name: Show result
+      - name: Assert the gate fired
+        shell: bash
         run: |
-          echo "verdict=${{ steps.audit.outputs.verdict }} findings=${{ steps.audit.outputs.findings }}"
-          cat "${{ runner.temp }}/mcp-audit/report.json"
+          set -euo pipefail
+          verdict="${{ steps.audit.outputs.verdict }}"
+          findings="${{ steps.audit.outputs.findings }}"
+          echo "verdict=$verdict findings=$findings"
+          test "$verdict" = "fail" || { echo "FAIL: expected verdict=fail, got $verdict"; exit 1; }
+          test "${{ steps.audit.outcome }}" = "failure" || { echo "FAIL: action did not gate"; exit 1; }
+          echo "OK: published action gated a known-CVE fixture (verdict=$verdict, $findings findings)"

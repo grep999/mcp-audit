@@ -157,6 +157,31 @@ def test_symlink_escape_ignored():
     assert len(rep["servers"]) == 0, "symlink escape should be ignored, got servers"
     print("PASS symlink-escape guard")
 
+def test_single_file_scan():
+    """Auditing a single config file (not a dir) must find its servers."""
+    import json as _json
+    tmp = Path(tempfile.mkdtemp())
+    f = tmp / "one.json"
+    f.write_text(_json.dumps({"mcpServers": {"github": {"command": "npx", "args": ["-y", "server-github@2.0.1"]}}}))
+    rep = run_audit(f)  # pass the FILE, not the dir
+    assert rep["summary"]["total_servers"] == 1, f"expected 1 server, got {rep['summary']['total_servers']}"
+    print("PASS single-file scan")
+
+
+def test_plugin_marketplace_not_flagged():
+    """Official Claude plugin-marketplace shape (bun + ${CLAUDE_PLUGIN_ROOT})
+    must NOT be flagged as an unpinned shell-capable server."""
+    import json as _json
+    tmp = Path(tempfile.mkdtemp())
+    (tmp / "plugins").mkdir()
+    (tmp / "plugins" / ".mcp.json").write_text(_json.dumps({"mcpServers": {
+        "telegram": {"command": "bun", "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "--shell=bun", "--silent", "start"]}
+    }}))
+    rep = run_audit(tmp)
+    poison = [f for f in rep["findings"] if f["category"] == "TOOL_POISONING"]
+    assert not poison, f"plugin marketplace wrongly flagged: {poison}"
+    print("PASS plugin-marketplace suppression")
+
 
 if __name__ == "__main__":
     test_schema_conformance()
@@ -170,4 +195,6 @@ if __name__ == "__main__":
     test_cursor_wrapper()
     test_huge_config_ignored()
     test_symlink_escape_ignored()
+    test_single_file_scan()
+    test_plugin_marketplace_not_flagged()
     print("\nAll tests passed")

@@ -37,22 +37,37 @@ FILE_REMOTE_HINTS = (
 
 
 def _load_configs(root: Path, feed: dict) -> list:
-    """Find MCP config files known to major AI clients. Bounded + symlink-safe."""
+    """Find MCP config files known to major AI clients. Bounded + symlink-safe.
+
+    If `root` is a single file, audit that file directly (the rglob path only
+    walks directories, so a file argument used to silently yield 0 servers).
+    """
     found = []
     root = root.resolve()
+    if root.is_file():
+        data = _try_load(root, root.parent)
+        if data is not None:
+            return [{"name": "file", "path": str(root), "data": data}]
+        return found
     for tgt in feed.get("targets") or _default_targets():
         for p in root.rglob(tgt["glob"]):
-            try:
-                rp = p.resolve()
-                if not str(rp).startswith(str(root)):
-                    continue  # symlink escape guard
-                if p.is_symlink() or p.stat().st_size > MAX_CONFIG_BYTES:
-                    continue
-                data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
-            except (json.JSONDecodeError, OSError, ValueError):
-                continue
-            found.append({"name": tgt["name"], "path": str(p), "data": data})
+            data = _try_load(p, root)
+            if data is not None:
+                found.append({"name": tgt["name"], "path": str(p), "data": data})
     return found
+
+
+def _try_load(p: Path, root: Path):
+    """Read+parse one config with the guards applied. None if it should be skipped."""
+    try:
+        rp = p.resolve()
+        if not str(rp).startswith(str(root)):
+            return None  # symlink escape guard
+        if p.is_symlink() or p.stat().st_size > MAX_CONFIG_BYTES:
+            return None
+        return json.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except (json.JSONDecodeError, OSError, ValueError):
+        return None
 
 
 def _default_targets():
@@ -155,7 +170,11 @@ def _audit_servers(servers: list, feed: dict) -> list:
                 "message": "Transport URL embeds credentials (user:pass@host).",
             })
         # 5. Filesystem/shell-capable command unpinned.
-        if any(re.search(p, blob) for p in FILE_REMOTE_HINTS) and transport_is_local(s) and not name_pinned(s):
+        #    Skip the official Claude plugin-marketplace shape: it runs `bun`
+        #    against a ${CLAUDE_PLUGIN_ROOT} anchor (not a floating @latest ref),
+        #    and is version-pinned by the marketplace itself.
+        plugin_managed = "${claude_plugin_root}" in blob or "plugin_root" in blob
+        if not plugin_managed and any(re.search(p, blob) for p in FILE_REMOTE_HINTS) and transport_is_local(s) and not name_pinned(s):
             findings.append({
                 "id": f"MCPA-{i:03d}", "severity": "medium",
                 "category": "TOOL_POISONING", "server": s["name"],

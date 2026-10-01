@@ -1,0 +1,14 @@
+{
+  "name": "mcp-audit",
+  "short_name": "mcp-audit",
+  "description": "Offline-first MCP server security scanner aligned to the NSA May-2026 threat taxonomy.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/favicon.ico", "sizes": "32x32 16x16", "type": "image/x-icon" }
+  ]
+}

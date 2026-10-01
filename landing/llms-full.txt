@@ -1,0 +1,39 @@
+# mcp-audit
+
+mcp-audit is an offline-first security scanner for Model Context Protocol (MCP) servers. It inspects MCP server definitions from your AI tooling — Claude Code, Cursor, Claude Desktop — against the NSA May-2026 MCP threat taxonomy and flags tool poisoning, hardcoded secrets, known-CVE servers, and rug-pulls before they reach your agents. One command, no cloud dependency, ships a GitHub Action CI gate.
+
+## Features
+
+mcp-audit ships with 6 detection categories: STALE_VERSION (known-CVE server matched against a registry, severity critical), HARDCODED_SECRET (API keys, PATs, JWTs, URL credentials, and env secrets, severity high), UNVERIFIED_SERVER (community/unverified registry names, severity high), TOOL_POISONING (unpinned filesystem/shell servers and rug-pull detection via state lockfile, severity medium), TOOL_PATH_CONFUSION (same server name across multiple configs, medium), and NETWORK_EGRESS (remote/SSE/http transport that sends data off-host, info).
+
+The rug-pull detection writes a git-committable state lockfile containing SHA-256 hashes of every server definition and diffs against it on every scan, so a tool whose definition changed between audits shows up as a reviewable PR diff.
+
+The scanner is offline-first: every binary ships a bundled baseline ruleset and known-CVE registry. An audit is always authoritative on its own, even in an air-gapped CI runner or sovereign environment. A live rules feed at /v1/registry is optional enrichment that degrades gracefully to baseline.
+
+## Quick start
+
+Install with pip and run against any repo:
+
+```
+pip install mcp-audit
+mcp-audit scan . --format markdown
+mcp-audit scan . --commit-state
+```
+
+Exit codes: 0=pass, 1=fail (critical or high), 2=review (medium). The exit code gates CI directly.
+
+## Known-CVE Registry
+
+mcp-audit's bundled known-vulnerable server registry includes CVE-2026-14540 (SSRF in Google MCP Toolbox fetch server) and CVE-2026-11719 (authorization bypass in Google MCP Toolbox for Databases via protocol-version header downgrade). The registry is updated in ruleset versions and published at /v1/registry.
+
+## Monitoring patterns
+
+The scan discovers MCP config files from Claude Code (.mcp.json), Cursor (.cursor/mcp.json), and Claude Desktop (claude_desktop_config.json). It normalizes multiple config shapes including mcpServers, servers, and Cursor's mcp.servers wrapper. Deduped by server name and transport. Each finding references the NSA category taxonomy.
+
+## Architecture
+
+The core scanner is a pure library that emits a versioned audit-report.json schema. Delivery channels are thin adapters: CLI (cli/main.py), GitHub Action (action/action.yml), and HTTP registry (api/service.py). The scanner depends on no network for correctness.
+
+## Licensing
+
+MIT License. Free to use, including the GitHub Action.

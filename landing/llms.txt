@@ -1,0 +1,12 @@
+# mcp-audit
+> Offline-first MCP server security scanner. Detects tool poisoning, hardcoded secrets, known-CVE servers, and rug-pulls. Aligned to the NSA May-2026 MCP security guidance and OWASP MCP Top 10.
+
+## Landing page
+- [mcp-audit](https://mcp-audit.dev/): Offline-first MCP server security scanner for AI agents. Inspects MCP servers across Claude, Cursor, and Desktop configs against 6 detection categories. Ships a git-committable rug-pull lockfile and a GitHub Action composite gate. One command, no cloud dependency, MIT license.
+
+## FAQ
+- FAQ: What is an MCP server and why does it need a security scan?
+- FAQ: Does mcp-audit need an internet connection to scan?
+- FAQ: What does the rug-pull detection do?
+- FAQ: Is mcp-audit free?
+- FAQ: Which MCP security taxonomy does mcp-audit follow?

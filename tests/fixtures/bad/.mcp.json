@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ]
+    },
+    "leaky": {
+      "command": "python",
+      "args": [
+        "run.py"
+      ],
+      "env": {
+        "API_KEY": "sk-test1234567890abcdef"
+      }
+    }
+  }
+}

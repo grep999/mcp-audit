@@ -1,0 +1,31 @@
+# Self-test: run the PUBLIC action (grep999/mcp-audit/action@v0.1.0) against
+# this repo's own fixture. Proves the published install path works on a real
+# runner: pip install git+...@v0.1.0 -> mcp-audit scan -> verdict + gate.
+name: mcp-audit action self-test
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The published, tagged action — the exact thing a third party would use.
+      - name: Run published mcp-audit action against known-CVE fixture
+        id: audit
+        uses: grep999/mcp-audit/action@v0.1.0
+        with:
+          path: tests/fixtures
+          fail-on: high
+
+      - name: Show result
+        run: |
+          echo "verdict=${{ steps.audit.outputs.verdict }} findings=${{ steps.audit.outputs.findings }}"
+          cat "${{ runner.temp }}/mcp-audit/report.json"

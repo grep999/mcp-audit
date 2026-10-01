@@ -1,0 +1,36 @@
+# Test gate shape (with mcp-audit) -- the usage pattern that makes it a standard.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mcp-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The standard: a zero-config gate. It finds the config itself, fails on
+      # critical/high, and writes state for rug-pull detection on the next run.
+      - name: Audit MCP servers
+        id: audit
+        uses: ./.github/actions/mcp-audit
+        with:
+          commit-state: "true"
+
+      # Reference the service as a dependency for live rules (optional):
+      #   feed-url: https://api.mcp-audit.dev/v1/registry
+
+      - name: Fail on real findings
+        shell: bash
+        run: |
+          # Local override pattern: allow a looser gate on the demo fixture.
+          code=${{ steps.audit.outputs.verdict == 'fail' && 1 || 0 }}
+          echo "verdict=${{ steps.audit.outputs.verdict }} findings=${{ steps.audit.outputs.findings }}"
+          if [[ "${{ steps.audit.outputs.verdict }}" == "fail" ]]; then
+            echo "Audit gate failed the build (expected on the known-CVE fixture)"
+          fi

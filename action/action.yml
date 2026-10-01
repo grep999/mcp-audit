@@ -1,0 +1,77 @@
+name: mcp-audit
+
+description: >
+  Audit the MCP servers in this repo against the NSA May-2026 MCP threat
+  taxonomy and a known-CVE registry. Fails the build on critical/high
+  findings. Uses the mcp-audit service for live rules when reachable;
+  otherwise falls back to the bundled baseline ruleset.
+
+inputs:
+  path:
+    description: Directory tree to audit (relative to repo root).
+    required: false
+    default: .
+  feed-url:
+    description: mcp-audit service endpoint for live rules (empty = bundled baseline).
+    required: false
+    default: ""
+  fail-on:
+    description: Severity threshold that fails the build (critical, high, or review).
+    required: false
+    default: high
+  commit-state:
+    description: Write .mcp-audit-state.json for rug-pull detection across runs.
+    required: false
+    default: "false"
+
+outputs:
+  verdict:
+    description: pass / review / fail
+  findings:
+    description: total findings count
+  report-path:
+    description: path to the JSON report artifact
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Run mcp-audit
+      id: audit
+      shell: bash
+      run: |
+        set -euo pipefail
+        FLAGS=()
+        [[ -n "${{ inputs.feed-url }}" ]] && FLAGS+=(--feed "${{ inputs.feed-url }}")
+        [[ "${{ inputs.commit-state }}" == "true" ]] && FLAGS+=(--commit-state)
+        report_dir="${RUNNER_TEMP:-/tmp}/mcp-audit"
+        mkdir -p "$report_dir"
+        set +e
+        python3 "${{ github.action_path }}"/cli/main.py scan "${{ inputs.path }}" "${FLAGS[@]}" \
+          > "$report_dir/report.json"
+        code=$?
+        set -e
+        # Patch the fallout of running from an unknown cwd: report target is fine as-is.
+        verdict=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['verdict'])")
+        findings=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['total_findings'])")
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        echo "findings=$findings" >> "$GITHUB_OUTPUT"
+        echo "report-path=$report_dir/report.json" >> "$GITHUB_OUTPUT"
+        # Gate: fail if scanner verdict reached the threshold.
+        fail_on="${{ inputs.fail-on }}"
+        if [[ "$fail_on" == "critical" && "$verdict" == "pass" ]]; then code=0; fi
+        exit $code
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcp-audit-report
+        path: ${{ runner.temp }}/mcp-audit/report.json

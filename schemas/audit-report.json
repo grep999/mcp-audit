@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mcp-audit.dev/schemas/audit-report.json",
+  "title": "MCP Audit Report",
+  "description": "The standard output of an MCP server audit. Versioned contract: scanners emit this, consumers (CI gates, dashboards, feeds) read it. This is the seed of the 'standard' - pin any tool change to a schema bump.",
+  "type": "object",
+  "required": ["schema_version", "target", "scanned_at", "servers", "findings", "summary"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "target": { "type": "string", "description": "Path or ref of what was audited" },
+    "scanned_at": { "type": "string", "format": "date-time" },
+    "source": {
+      "type": "object",
+      "properties": {
+        "feed_url": { "type": "string", "description": "The service endpoint the rules came from. Empty = local baseline only." },
+        "feed_ok": { "type": "boolean" },
+        "rules_version": { "type": "string" }
+      }
+    },
+    "servers": {
+      "type": "array",
+      "description": "Inventory of MCP servers found in config(s)",
+      "items": {
+        "type": "object",
+        "required": ["name", "transport", "config_path"],
+        "properties": {
+          "name": { "type": "string" },
+          "transport": { "enum": ["stdio", "sse", "http", "ws", "unknown"] },
+          "command": { "type": "string" },
+          "url": { "type": "string" },
+          "config_path": { "type": "string" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "Each finding maps to the NSA May-2026 MCP threat taxonomy category.",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "category", "server", "message"],
+        "properties": {
+          "id": { "type": "string" },
+          "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+          "category": { "type": "string", "description": "NSA taxonomy category (e.g. TOOL_POISONING, HARDCODED_SECRET, NETWORK_EGRESS)" },
+          "server": { "type": "string" },
+          "message": { "type": "string" },
+          "cve": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total_servers", "total_findings", "by_severity", "verdict"],
+      "properties": {
+        "total_servers": { "type": "integer" },
+        "total_findings": { "type": "integer" },
+        "by_severity": {
+          "type": "object",
+          "additionalProperties": { "type": "integer" }
+        },
+        "verdict": { "enum": ["pass", "review", "fail"] }
+      }
+    }
+  }
+}

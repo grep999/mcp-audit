@@ -58,4 +58,4 @@ Allow: /
 User-agent: CCBot
 Allow: /
 
-Sitemap: https://mcp-audit.dev/sitemap.xml
+Sitemap: https://grep999.github.io/mcp-audit/sitemap.xml

@@ -40,13 +40,13 @@ KNOWN_VULNERABLE = {
 
 # Unverified / risky server-name substrings. Deliberately conservative.
 RISKY_NAME_HINTS = ("community", "unverified", "unofficial", "hack")
-FILE_NAME_HINTS = ("filesystem", "git", "shell", "exec", "bash", "ssh")
 
-# Config files we know how to find. Keyed by display name for the report.
+# Config files we know how to find. glob is used with Path.rglob, so it is a
+# plain suffix pattern (not `**/`). Keyed by display name for the report.
 TARGETS = [
-    {"name": "Claude Code", "glob": "**/.mcp.json"},
-    {"name": "Cursor", "glob": "**/.cursor/mcp.json"},
-    {"name": "Claude Desktop", "glob": "**/claude_desktop_config.json"},
+    {"name": "Claude Code", "glob": ".mcp.json"},
+    {"name": "Cursor", "glob": "mcp.json"},
+    {"name": "Claude Desktop", "glob": "claude_desktop_config.json"},
 ]
 
 
@@ -59,7 +59,7 @@ def build_baseline() -> dict:
         "taxonomy": TAXONOMY,
         "known_vulnerable": KNOWN_VULNERABLE,
         "risky_name_hints": RISKY_NAME_HINTS,
-        "file_name_hints": FILE_NAME_HINTS,
+        "targets": TARGETS,
     }
 
 

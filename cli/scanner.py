@@ -2,23 +2,54 @@
 
 Emit the audit-report.json standard. Functions are pure -> testable. The
 network feed is optional enrichment layered on top (see cli/).
+
+Trust boundary: configs are attacker-influenced input. We bound file size,
+never eval, never follow symlinks out of the audit root, and treat every
+string as untrusted data.
 """
 import json
+import re
 from pathlib import Path
 
-from api.feed import TAXONOMY, build_baseline
+from api.feed import build_baseline
 
 SCHEMA_VERSION = "1.0.0"
+MAX_CONFIG_BYTES = 2_000_000  # refuse absurd files (DoS guard)
+
+# Credential patterns for config/source. Conservative: prefer false positive
+# over missing (this is a gate, not an auto-fixer).
+SECRET_PATTERNS = [
+    (re.compile(r"\bsk-[A-Za-z0-9][A-Za-z0-9-]{14,}\b"), "OpenAI-style API key"),
+    (re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"), "GitHub PAT"),
+    (re.compile(r"\bgho_[A-Za-z0-9]{20,}\b"), "GitHub OAuth token"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key id"),
+    (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "Slack token"),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "JWT"),
+    (re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd)\b\s*[:=]\s*['\"][A-Za-z0-9_\-/+=.@]{12,}"), "inline secret assignment"),
+]
+CREDENTIAL_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@]+:[^/\s@]+@")
+# Word-boundary patterns so 'git' does not match 'github'
+FILE_REMOTE_HINTS = (
+    r"\bfilesystem\b", r"\bshell\b", r"\bexec(ute|ution)?\b",
+    r"\bbash\b", r"\bssh\b", r"\bchown\b", r"\bchmod\b",
+    r"npx[^\"]*server-filesystem", r"uvx[^\"]*server-filesystem",
+)
 
 
 def _load_configs(root: Path, feed: dict) -> list:
-    """Find MCP config files known to major AI clients. Pure file discovery."""
+    """Find MCP config files known to major AI clients. Bounded + symlink-safe."""
     found = []
-    for tgt in feed["targets"] if "targets" in feed else _default_targets():
+    root = root.resolve()
+    for tgt in feed.get("targets") or _default_targets():
         for p in root.rglob(tgt["glob"]):
             try:
-                data = json.loads(p.read_text())
-            except (json.JSONDecodeError, OSError):
+                rp = p.resolve()
+                if not str(rp).startswith(str(root)):
+                    continue  # symlink escape guard
+                if p.is_symlink() or p.stat().st_size > MAX_CONFIG_BYTES:
+                    continue
+                data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+            except (json.JSONDecodeError, OSError, ValueError):
                 continue
             found.append({"name": tgt["name"], "path": str(p), "data": data})
     return found
@@ -47,14 +78,15 @@ def _extract_servers(config: dict) -> list:
         container = raw["mcp"].get("servers", raw["mcp"])
     if not container:
         return servers
-    for name, defn in (container.items() if isinstance(container, dict) else []):
+    for name, defn in container.items():
         if not isinstance(defn, dict):
             continue
-        # Transport detection
         transport = "stdio"
         url = None
         command = None
-        if "url" in defn:
+        args = defn.get("args") if isinstance(defn.get("args"), list) else []
+        env = defn.get("env") if isinstance(defn.get("env"), dict) else {}
+        if "url" in defn and isinstance(defn["url"], str):
             transport = "http" if defn["url"].startswith(("http://", "https://")) else "sse"
             url = defn["url"]
         if "command" in defn:
@@ -64,50 +96,94 @@ def _extract_servers(config: dict) -> list:
             "transport": transport,
             "url": url,
             "command": command,
+            "args": [a for a in args if isinstance(a, str)],
+            "env": {k: v for k, v in env.items() if isinstance(v, str)},
         })
     return servers
+
+
+def _scan_text_for_secrets(text: str) -> list:
+    hits = []
+    for pat, label in SECRET_PATTERNS:
+        if pat.search(text):
+            hits.append(label)
+    return hits
 
 
 def _audit_servers(servers: list, feed: dict) -> list:
     """Rules eval. Each returns findings. Pure and side-effect-free."""
     findings = []
     risky = feed["risky_name_hints"]
-    fhints = feed["file_name_hints"]
     known = feed["known_vulnerable"]
 
-    n = 0
-    for s in servers:
-        n += 1
+    def _secret_hits(s):
+        return _scan_text_for_secrets(json.dumps(s, default=str))
+
+    for i, s in enumerate(servers, 1):
         name = (s["name"] or "").lower()
-        cmd = (s["command"] or "").lower()
+        blob = json.dumps(s, default=str).lower()
         # 1. Known-vulnerable registry hit.
         for reg_name, rec in known.items():
             if any(k in name for k in rec["match_keys"]):
                 findings.append({
-                    "id": f"MCPA-{n:03d}", "severity": "critical",
+                    "id": f"MCPA-{i:03d}", "severity": "critical",
                     "category": "STALE_VERSION", "server": s["name"],
                     "cve": rec["cves"][0], "message": f"Known-vulnerable server: {rec['note']}",
                 })
         # 2. Unverified registry name hint.
         if any(h in name for h in risky):
             findings.append({
-                "id": f"MCPA-{n:03d}", "severity": "high",
+                "id": f"MCPA-{i:03d}", "severity": "high",
                 "category": "UNVERIFIED_SERVER", "server": s["name"],
                 "message": "Server lookalike unverified-registry name (community/unverified/unofficial).",
             })
-        # 3. File/shell remoting capability without pinning = poison surface.
-        if any(h in cmd for h in fhints) and transport_is_local(s) and not name_pinned(s):
+        # 3. Hardcoded credential material anywhere in the server def.
+        for label in _secret_hits(s):
             findings.append({
-                "id": f"MCPA-{n:03d}", "severity": "medium",
+                "id": f"MCPA-{i:03d}", "severity": "high",
+                "category": "HARDCODED_SECRET", "server": s["name"],
+                "message": f"Possible credential in server definition: {label}.",
+                "evidence": "redacted",
+            })
+        # 4. Credentials embedded in a transport URL.
+        if s["url"] and CREDENTIAL_URL.search(s["url"]):
+            findings.append({
+                "id": f"MCPA-{i:03d}", "severity": "high",
+                "category": "HARDCODED_SECRET", "server": s["name"],
+                "message": "Transport URL embeds credentials (user:pass@host).",
+            })
+        # 5. Filesystem/shell-capable command unpinned.
+        if any(re.search(p, blob) for p in FILE_REMOTE_HINTS) and transport_is_local(s) and not name_pinned(s):
+            findings.append({
+                "id": f"MCPA-{i:03d}", "severity": "medium",
                 "category": "TOOL_POISONING", "server": s["name"],
                 "message": "Filesystem/shell-capable server command is unpinned (floating ref).",
             })
-        # 4. Network egress server.
+        # 6. Network egress server.
         if s["transport"] in ("http", "sse", "ws"):
             findings.append({
-                "id": f"MCPA-{n:03d}", "severity": "info",
+                "id": f"MCPA-{i:03d}", "severity": "info",
                 "category": "NETWORK_EGRESS", "server": s["name"],
-                "message": f"Remote transport, data leaves host: {s['url']}",
+                "message": f"Remote transport; data leaves host: {s['url']}",
+            })
+    return findings
+
+
+def _shadow_findings(servers: list) -> list:
+    """Same server name defined more than once across config files.
+    Run on the RAW (pre-dedup) list, because dedup would already have removed
+    the second occurrence by the time the main audit sees it.
+    """
+    counts = {}
+    for s in servers:
+        counts[s["name"].lower()] = counts.get(s["name"].lower(), 0) + 1
+    findings = []
+    for name, n in counts.items():
+        if n > 1:
+            findings.append({
+                "id": "MCPA-TOOLPATH", "severity": "medium",
+                "category": "TOOL_PATH_CONFUSION", "server": name,
+                "message": f"Server '{name}' defined {n} times (namespace shadowing risk).",
             })
     return findings
 
@@ -117,9 +193,16 @@ def transport_is_local(s: dict) -> bool:
 
 
 def name_pinned(s: dict) -> bool:
-    # Heuristic: pinned means 'name@version' or 'name-1.2.3' in command path/args.
-    cmd = s.get("command", "") or ""
-    return ("@" in cmd) or any(ch.isdigit() for ch in (s.get("name", ""))[-2:])
+    """Pinned == a version is explicitly specified (X@Y or X.Y.Z anywhere in
+    the server def). Bare 'latest' / no version = unpinned."""
+    for p in [s.get("name", "") or "", s.get("command", "") or "", *s.get("args", [])]:
+        if not p:
+            continue
+        if "latest" in p.lower():
+            return False
+        if "@" in p or re.search(r"\d+\.\d+", p):
+            return True
+    return False
 
 
 def _summarize(servers: list, findings: list) -> dict:
@@ -140,7 +223,9 @@ def _summarize(servers: list, findings: list) -> dict:
     }
 
 
-def run_audit(root: Path, feed: dict | None = None) -> dict:
+def run_audit(root, feed: dict | None = None) -> dict:
+    import datetime
+    root = Path(root)
     feed = feed or build_baseline()
     configs = _load_configs(root, feed)
     servers = []
@@ -155,32 +240,14 @@ def run_audit(root: Path, feed: dict | None = None) -> dict:
             seen.add(k)
             uniq.append(s)
     findings = _audit_servers(uniq, feed)
+    shadow = _shadow_findings(servers)  # use pre-dedup list to catch cross-config dupes
+    findings.extend(shadow)
     return {
         "schema_version": SCHEMA_VERSION,
         "target": str(root),
-        "scanned_at": __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc).isoformat(),
+        "scanned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "source": {"feed_url": None, "feed_ok": True, "rules_version": feed["rules_version"]},
         "servers": uniq,
         "findings": findings,
         "summary": _summarize(uniq, findings),
     }
-
-
-if __name__ == "__main__":
-    import sys
-    import os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import json as _json
-    # quick self-check
-    from pathlib import Path as _P
-    p = _P(__file__).parent.parent / "examples" / "sample-config.json"
-    if p.exists():
-        import tempfile, shutil
-        # copy config into a temp dir to mimic a project
-        tmp = _P(tempfile.mkdtemp())
-        shutil.copy(p, tmp / ".mcp.json")
-        rep = run_audit(tmp)
-        print(_json.dumps(rep, indent=2, default=str))
-    else:
-        print("no example; run scanner on a dir")

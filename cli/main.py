@@ -1,7 +1,7 @@
 """mcp-audit CLI.
 
 Usage:
-    python -m cli.main scan <path> [--feed <url>] [--no-network]
+    python -m cli.main scan <path> [--format json|text|markdown] [--feed <url>] [--no-network]
     python -m cli.main serve            # one-shot feed dump (used by /v1/registry)
 
 Exit codes: 0=pass, 1=fail, 2=review. CI gate = non-zero.
@@ -17,6 +17,7 @@ from pathlib import Path
 from api.feed import build_baseline, serve_payload
 from cli.scanner import run_audit
 from cli.state import check_rug_pull, save_state
+from cli.report import to_markdown, to_text
 
 
 def _maybe_feed(url: str | None, offline: bool) -> tuple[dict, dict | None]:
@@ -43,6 +44,8 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     scan = sub.add_parser("scan", help="audit an MCP config tree")
     scan.add_argument("path")
+    scan.add_argument("--format", default="json", choices=["json", "text", "markdown"],
+                      help="output format (default: json)")
     scan.add_argument("--feed", default=None, help="service URL for live rules")
     scan.add_argument("--no-network", action="store_true")
     scan.add_argument("--commit-state", action="store_true",
@@ -68,7 +71,13 @@ def main() -> int:
                 report["summary"]["by_severity"].get(f["severity"], 0) + 1
 
     report["source"].update(meta)
-    print(json.dumps(report, indent=2, default=str))
+
+    if args.format == "json":
+        print(json.dumps(report, indent=2, default=str))
+    elif args.format == "markdown":
+        print(to_markdown(report))
+    else:
+        print(to_text(report))
 
     if args.commit_state:
         save_state(root, report["servers"])

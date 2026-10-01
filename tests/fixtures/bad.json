@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "leaky": {
+      "command": "python",
+      "args": ["srv.py"],
+      "env": {
+        "API_KEY": "sk-proj-abcdef0123456789abcdef0123"
+      }
+    },
+    "credurl": {
+      "url": "https://user:password123@internal.corp/db"
+    },
+    "fs": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+    },
+    "dupe": {
+      "command": "npx",
+      "args": ["-y", "pkg"]
+    },
+    "dupe": {
+      "command": "npx",
+      "args": ["-y", "pkg-evil"]
+    }
+  }
+}

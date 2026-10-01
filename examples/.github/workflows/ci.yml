@@ -16,6 +16,11 @@ jobs:
 
       # The standard: a zero-config gate. It finds the config itself, fails on
       # critical/high, and writes state for rug-pull detection on the next run.
+# For YOUR repo (third-party usage):
+#     - uses: grep999/mcp-audit/action@v0.1.0
+#       with:
+#         commit-state: "true"
+# For self-test against this repo (local):
       - name: Audit MCP servers
         id: audit
         uses: ./.github/actions/mcp-audit

@@ -19,6 +19,10 @@ inputs:
     description: Severity threshold that fails the build (critical, high, or review).
     required: false
     default: high
+  version:
+    description: Git ref (tag/branch) of mcp-audit to install. Defaults to latest tagged release.
+    required: false
+    default: v0.1.0
   commit-state:
     description: Write .mcp-audit-state.json for rug-pull detection across runs.
     required: false
@@ -43,6 +47,11 @@ runs:
       with:
         python-version: "3.12"
 
+    - name: Install mcp-audit
+      shell: bash
+      run: |
+        pip install git+https://github.com/grep999/mcp-audit@${{ inputs.version }}
+
     - name: Run mcp-audit
       id: audit
       shell: bash
@@ -54,8 +63,7 @@ runs:
         report_dir="${RUNNER_TEMP:-/tmp}/mcp-audit"
         mkdir -p "$report_dir"
         set +e
-        python3 "${{ github.action_path }}/cli/main.py" scan "${{ inputs.path }}" "${FLAGS[@]}" \
-          > "$report_dir/report.json" 2>&1
+        mcp-audit scan "${{ inputs.path }}" "${FLAGS[@]}" > "$report_dir/report.json" 2>&1
         code=$?
         set -e
         verdict=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['verdict'])")
@@ -64,14 +72,14 @@ runs:
         echo "findings=$findings" >> "$GITHUB_OUTPUT"
         echo "report-path=$report_dir/report.json" >> "$GITHUB_OUTPUT"
         echo "Verdict: $verdict ($findings findings)"
-        # Emit GH annotations inline (self-contained; no package import)
+        # Emit GH annotations
         python3 -c "import json;r=json.load(open('$report_dir/report.json'));[print('::%s file=.mcp.json,title=mcp-audit::[%s] %s: %s'%('error' if f['severity'] in ('critical','high') else 'warning',f.get('category'),f.get('server'),f.get('message'))) for f in r.get('findings',[]) if f.get('severity') in ('critical','high','medium')]" || true
         # Gate: fail if scanner verdict doesn't match the threshold.
         fail_on="${{ inputs.fail-on }}"
         case "$fail_on" in
           critical) [[ "$verdict" == "review" || "$verdict" == "pass" ]] && code=0 ;;
           high)     [[ "$verdict" == "pass" ]] && code=0 ;;
-          review)   code=0 ;;  # info-only, never fail
+          review)   code=0 ;;
         esac
         exit $code
 

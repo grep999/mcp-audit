@@ -24,7 +24,7 @@ Exit codes: 0=pass, 1=fail (critical or high), 2=review (medium). The exit code 
 
 ## Known-CVE Registry
 
-mcp-audit's bundled known-vulnerable server registry includes CVE-2026-14540 (SSRF in Google MCP Toolbox fetch server) and CVE-2026-11719 (authorization bypass in Google MCP Toolbox for Databases via protocol-version header downgrade). The registry is updated in ruleset versions and published at /v1/registry.
+mcp-audit's bundled known-vulnerable server registry ships 9 entries — including CVE-2026-14540 (SSRF in Google MCP Toolbox fetch server), CVE-2026-11719 (Google MCP Toolbox Databases authz bypass), CVE-2025-6514 (mcp-remote OAuth command injection, CVSS 9.6), CVE-2025-68145 (Anthropic mcp-server-git RCE chain), CVE-2026-0755 (gemini-mcp-tool command injection), CVE-2026-46519 (mcp-server-kubernetes tool access-control bypass), and CVE-2025-49596 (Anthropic MCP Inspector unauth RCE). The registry maps to the 30+ MCP CVEs disclosed in the first 60 days of 2026. It is updated in ruleset versions and published at /v1/registry.
 
 ## Monitoring patterns
 

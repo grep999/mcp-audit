@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: mcp-audit
-Version: 0.1.0
-Summary: Audit MCP servers before an AI agent trusts them. NSA May-2026 taxonomy, known-CVE registry, rug-pull detection.
-License: MIT
-Requires-Python: >=3.10
-License-File: LICENSE
-Dynamic: license-file

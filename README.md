@@ -102,7 +102,7 @@ tests/                      # 14 contract tests, no network
 **Skipped (add when a paying user needs it):**
 - Source-tree AST scanning (deeper NSA coverage) — needs a real parser, not the POC's string checks
 - Real version-pin resolution (parse the actual version, not heuristics)
-- CVE feed growth (registry has 2 entries; the moat is more entries)
+- CVE feed growth (registry ships 9 real entries; the moat is keeping it current against the 30+ MCP CVEs disclosed in 2026)
 - Auth on the registry (currently open; fine for internal/self-host)
 
 ## Licensing & note

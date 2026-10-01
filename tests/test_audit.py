@@ -39,6 +39,36 @@ def test_known_vuln_detected():
     print("PASS known-CVE detection")
 
 
+def test_mcp_supply_chain_cves_detected():
+    """The wider MCP supply-chain CVE registry is wired up, not just fetch."""
+    cases = {
+        "mcp-remote": "CVE-2025-6514",
+        "mcp-server-git": "CVE-2025-68145",
+        "gemini-mcp": "CVE-2026-0755",
+        "mcp-server-kubernetes": "CVE-2026-46519",
+        "splunk-mcp": "CVE-2026-20205",
+    }
+    for key, cve in cases.items():
+        rep = _audit({"mcpServers": {key: {"command": "npx", "args": ["-y", key]}}})
+        matched = [f for f in rep["findings"] if f.get("cve") == cve]
+        assert rep["summary"]["verdict"] == "fail", f"{key}: expected fail, got {rep['summary']['verdict']}"
+        assert matched, f"{key}: expected CVE {cve} in findings"
+    print("PASS supply-chain CVE registry (5 CVEs)")
+
+
+def test_vscode_copilot_target_detected():
+    """VS Code Copilot uses .vscode/mcp.json with a 'servers' root key."""
+    tmp = Path(tempfile.mkdtemp())
+    vsc = tmp / ".vscode"; vsc.mkdir()
+    (vsc / "mcp.json").write_text(json.dumps({"servers": {
+        "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github@2.0.1"]}
+    }}))
+    rep = run_audit(tmp)
+    assert rep["summary"]["total_servers"] == 1, "copilot config not discovered"
+    assert any(s["name"] == "github" for s in rep["servers"]), "github server not extracted"
+    print("PASS VS Code Copilot target detection")
+
+
 def test_clean_config_passes():
     rep = _audit({"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github@2.0.1"]}}})
     assert rep["summary"]["verdict"] == "pass", f"expected pass, got {rep['summary']['verdict']}"

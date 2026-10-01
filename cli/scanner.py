@@ -122,11 +122,13 @@ def _audit_servers(servers: list, feed: dict) -> list:
     for i, s in enumerate(servers, 1):
         name = (s["name"] or "").lower()
         blob = json.dumps(s, default=str).lower()
-        # 1. Known-vulnerable registry hit.
+        # 1. Known-vulnerable registry hit. Match the server's identity
+        # (name + command + args), since the package name usually lives in args.
+        identity = " ".join([name, (s.get("command") or "").lower(), *[a.lower() for a in s.get("args", [])]])
         for reg_name, rec in known.items():
-            if any(k in name for k in rec["match_keys"]):
+            if any(re.search(r"(?<![a-z])" + re.escape(k) + r"(?![a-z])", identity) for k in rec["match_keys"]):
                 findings.append({
-                    "id": f"MCPA-{i:03d}", "severity": "critical",
+                    "id": f"MCPA-{i:03d}", "severity": rec.get("severity", "critical"),
                     "category": "STALE_VERSION", "server": s["name"],
                     "cve": rec["cves"][0], "message": f"Known-vulnerable server: {rec['note']}",
                 })

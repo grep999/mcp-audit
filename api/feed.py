@@ -9,7 +9,7 @@ import os
 import time
 
 # Version bump on any ruleset change so consumers can pin and diff.
-RULES_VERSION = "2026.09.01"
+RULES_VERSION = "2026.10.01"
 
 # NSA May-2026 MCP threat taxonomy (11 categories) -- abridged to those the
 # baseline scanner can detect purely from config/source inspection.
@@ -22,10 +22,13 @@ TAXONOMY = {
     "STALE_VERSION": "Server pinned to a version with a known CVE or an unpinned/floating ref.",
 }
 
-# Known-vulnerable public MCP servers: (registry_name, transports, [CVEs], note)
+# Known-vulnerable public MCP servers. Severity per source (CVSS-based); the
+# match_key is the vulnerable package name so a server is only flagged when it
+# names that exact package (substring match, deliberately conservative to avoid
+# false-critical on unrelated tools). 'severity' defaults to critical.
 KNOWN_VULNERABLE = {
     "fetch": {
-        "match_keys": ["fetch", "mcp-server-fetch"],
+        "match_keys": ["mcp-server-fetch", "fetch-server"],
         "transports": ["stdio", "sse"],
         "cves": ["CVE-2026-14540"],
         "note": "SSRF in URL input (Google MCP Toolbox family).",
@@ -36,6 +39,55 @@ KNOWN_VULNERABLE = {
         "cves": ["CVE-2026-11719"],
         "note": "AuthZ bypass: protocol-version header downgrade lets low-priv token call admin tools.",
     },
+    "mcp-remote": {
+        "match_keys": ["mcp-remote", "mcp_remote"],
+        "transports": ["stdio", "sse"],
+        "cves": ["CVE-2025-6514"],
+        "severity": "critical",
+        "note": "OAuth command injection (CVSS 9.6): weaponized authorization_endpoint executed via open(); fix in 0.1.16.",
+    },
+    "mcp-server-git": {
+        "match_keys": ["server-git", "mcp-server-git"],
+        "transports": ["stdio"],
+        "cves": ["CVE-2025-68145"],
+        "severity": "critical",
+        "note": "Anthropic git server RCE chain (CVE-2025-68145/68143/68144): path-validation bypass to full RCE via malicious .git/config.",
+    },
+    "gemini-mcp-tool": {
+        "match_keys": ["gemini-mcp-tool", "gemini-mcp"],
+        "transports": ["stdio"],
+        "cves": ["CVE-2026-0755"],
+        "severity": "critical",
+        "note": "Unsanitized shell command injection (CVSS 9.8).",
+    },
+    "mcp-inspector": {
+        "match_keys": ["mcp-inspector", "inspector-proxy"],
+        "transports": ["stdio", "http"],
+        "cves": ["CVE-2025-49596"],
+        "severity": "critical",
+        "note": "Anthropic MCP Inspector unauth RCE (CVSS 9.4) / DNS rebinding exposing filesystem + secrets.",
+    },
+    "markitdown": {
+        "match_keys": ["markitdown"],
+        "transports": ["stdio"],
+        "cves": ["TRA-2025-36"],
+        "severity": "high",
+        "note": "Microsoft MarkItDown MCP server SSRF.",
+    },
+    "mcp-server-kubernetes": {
+        "match_keys": ["server-kubernetes", "kubernetes-mcp"],
+        "transports": ["stdio", "http", "sse"],
+        "cves": ["CVE-2026-46519"],
+        "severity": "high",
+        "note": "Tool access-control bypass (GHSA-cr22-wjx7-2w6m): ALLOWED_TOOLS enforced only at tools/list, not tools/call.",
+    },
+    "splunk-mcp": {
+        "match_keys": ["splunk"],
+        "transports": ["stdio", "http", "sse"],
+        "cves": ["CVE-2026-20205"],
+        "severity": "high",
+        "note": "Splunk MCP server plaintext token disclosure.",
+    },
 }
 
 # Unverified / risky server-name substrings. Deliberately conservative.
@@ -45,7 +97,8 @@ RISKY_NAME_HINTS = ("community", "unverified", "unofficial", "hack")
 # plain suffix pattern (not `**/`). Keyed by display name for the report.
 TARGETS = [
     {"name": "Claude Code", "glob": ".mcp.json"},
-    {"name": "Cursor", "glob": "mcp.json"},
+    {"name": "Cursor", "glob": ".cursor/mcp.json"},
+    {"name": "VS Code Copilot", "glob": ".vscode/mcp.json"},
     {"name": "Claude Desktop", "glob": "claude_desktop_config.json"},
 ]
 

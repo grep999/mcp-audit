@@ -48,25 +48,31 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        FLAGS=()
+        FLAGS=(--format json)
         [[ -n "${{ inputs.feed-url }}" ]] && FLAGS+=(--feed "${{ inputs.feed-url }}")
         [[ "${{ inputs.commit-state }}" == "true" ]] && FLAGS+=(--commit-state)
         report_dir="${RUNNER_TEMP:-/tmp}/mcp-audit"
         mkdir -p "$report_dir"
         set +e
-        python3 "${{ github.action_path }}"/cli/main.py scan "${{ inputs.path }}" "${FLAGS[@]}" \
-          > "$report_dir/report.json"
+        python3 "${{ github.action_path }}/cli/main.py" scan "${{ inputs.path }}" "${FLAGS[@]}" \
+          > "$report_dir/report.json" 2>&1
         code=$?
         set -e
-        # Patch the fallout of running from an unknown cwd: report target is fine as-is.
         verdict=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['verdict'])")
         findings=$(python3 -c "import json,sys; print(json.load(open('$report_dir/report.json'))['summary']['total_findings'])")
         echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
         echo "findings=$findings" >> "$GITHUB_OUTPUT"
         echo "report-path=$report_dir/report.json" >> "$GITHUB_OUTPUT"
-        # Gate: fail if scanner verdict reached the threshold.
+        echo "Verdict: $verdict ($findings findings)"
+        # Emit GH annotations inline (self-contained; no package import)
+        python3 -c "import json;r=json.load(open('$report_dir/report.json'));[print('::%s file=.mcp.json,title=mcp-audit::[%s] %s: %s'%('error' if f['severity'] in ('critical','high') else 'warning',f.get('category'),f.get('server'),f.get('message'))) for f in r.get('findings',[]) if f.get('severity') in ('critical','high','medium')]" || true
+        # Gate: fail if scanner verdict doesn't match the threshold.
         fail_on="${{ inputs.fail-on }}"
-        if [[ "$fail_on" == "critical" && "$verdict" == "pass" ]]; then code=0; fi
+        case "$fail_on" in
+          critical) [[ "$verdict" == "review" || "$verdict" == "pass" ]] && code=0 ;;
+          high)     [[ "$verdict" == "pass" ]] && code=0 ;;
+          review)   code=0 ;;  # info-only, never fail
+        esac
         exit $code
 
     - name: Upload report

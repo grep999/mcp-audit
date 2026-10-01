@@ -10,12 +10,14 @@ gate.
 
 ## What it checks (NSA May-2026 taxonomy)
 
-- **HARDCODED_SECRET** — keys/tokens in config or source
-- **TOOL_POISONING** — tool descriptions engineered to mislead agents; **rug-pull**
-  (definition changed since last scan)
-- **UNVERIFIED_SERVER** — community/unverified/unofficial registry name
-- **NETWORK_EGRESS** — server that sends data off-host (SSE/http transport)
-- **STALE_VERSION** — pinned to a version with a known CVE (registry)
+| Category | What it detects | Severity |
+|---|---|---|
+| **STALE_VERSION** | Known-vulnerable server (registry of CVEs) | critical |
+| **UNVERIFIED_SERVER** | community/unverified/unofficial registry names | high |
+| **HARDCODED_SECRET** | API keys, PATs, JWTs, URL creds, env secrets | high |
+| **TOOL_POISONING** | Unpinned filesystem/shell server; rug-pull (changed def) | medium |
+| **TOOL_PATH_CONFUSION** | Same server name in multiple configs (shadowing) | medium |
+| **NETWORK_EGRESS** | Remote/SSE/http transport (data leaves host) | info |
 
 ## Architecture (the part that makes it a *standard*)
 
@@ -52,47 +54,57 @@ decoupling is what makes it adoptable as a standard instead of a vendor lock.
 ## Quick start
 
 ```bash
-# audit a repo (finds .mcp.json, .cursor/mcp.json, claude_desktop_config.json)
-python3 -m cli.main scan .
-# exit codes: 0=pass 1=fail 2=review  → gate directly in CI
+make check                    # run all contract tests
 
-# CI gate
-python3 -m cli.main scan . --commit-state   # writes .mcp-audit-state.json
+python3 -m cli.main scan .                     # json (default)
+python3 -m cli.main scan . --format text       # terminal
+python3 -m cli.main scan . --format markdown   # the $99 deliverable
+python3 -m cli.main scan . --commit-state      # write rug-pull lockfile
+python3 -m cli.main scan . --feed <url>        # use live registry (optional)
+
+# exit codes: 0=pass 1=fail 2=review → gate directly in CI
 ```
 
-Contract tests: `python3 tests/test_audit.py` (4 checks, no network).
+Run the registry service (channel for live rules):
 
-## How this becomes a standard (the thesis)
-
-1. **Own the output contract.** `audit-report.json` v1.0.0 is the thing tools
-   interop on. Anything that can emit that schema is "mcp-audit compliant".
-   Pinning = versioning = the standard lives in the data, not the vendor.
-2. **Be correct offline.** A standard that dies when its cloud is down is a
-   product. Ship the rules in the binary; treat the feed as a cache refresh.
-3. **Be the source of the CVE registry.** The registry (`feed.py`) is the
-   moat. Start small (2 entries), grow it as MCP servers ship CVEs, publish it
-   as a daily JSON feed. The feed *is* the content marketing / lead gen.
-4. **State is a git-committable lockfile.** Rug-pull detection works because
-   the previous scan is in version control — a change to your agents' tools
-   shows up as a reviewable diff, exactly like a lockfile diff. No new UX.
-5. **Transport-agnostic.** GitHub Action now; GitLab/pre-commit/local next for
-   zero added code. The scanner doesn't know which door it came through.
-
-## Monetization ladder (later, not POC)
-
-- $99 one-shot "agent tooling audit" report
-- $29/mo CI gate seat (the `commit-state` rug-pull loop)
-- free daily CVE feed → email alerts → lead-gen for the above
+```bash
+make service        # python3 -m api.service --port 8080
+curl localhost:8080/v1/registry
+```
 
 ## Layout
 
 ```
-schemas/audit-report.json   # THE STANDARD (contract)
-api/feed.py                 # rules + known-CVE registry + /v1/registry payload
-cli/scanner.py              # pure scanner (the heart)
-cli/state.py                # rug-pull memory (git-committable)
-cli/main.py                 # CLI entry + exit-code gate
-action/action.yml           # GitHub Actions composite action (channel #1)
-examples/.github/workflows/ci.yml  # reference usage
-tests/test_audit.py         # contract tests (4, no network)
+schemas/audit-report.json   # THE STANDARD (versioned contract)
+api/feed.py                 # rules + known-CVE registry (the moat)
+api/service.py              # optional HTTP /v1/registry (channel)
+cli/scanner.py              # pure core (the heart)
+cli/state.py                # rug-pull memory (git-committable lockfile)
+cli/main.py                 # CLI + exit-code gate
+cli/report.py               # text / markdown / GH annotations renders
+action/action.yml           # GitHub Actions composite action (channel)
+pyproject.toml              # packaging: `mcp-audit` console script
+Makefile                    # check / test / install / service
+tests/                      # 14 contract tests, no network
 ```
+
+## Current state vs "the wild"
+
+**Done (verified by 14 passing tests + live e2e):**
+- Config discovery (Claude, Cursor, Desktop), transport detection, dedupe
+- 6 checks + shadowing, secret patterns, credential URLs, pin detection
+- Rug-pull lockfile (`.mcp-audit-state.json`)
+- Report renderers (text / markdown / GH annotations)
+- HTTP registry service with feed fallback (verified live)
+- Security guards: symlink-escape, oversized-file, type-checked input
+- Packaging via `pyproject.toml`
+
+**Skipped (add when a paying user needs it):**
+- Source-tree AST scanning (deeper NSA coverage) — needs a real parser, not the POC's string checks
+- Real version-pin resolution (parse the actual version, not heuristics)
+- CVE feed growth (registry has 2 entries; the moat is more entries)
+- Auth on the registry (currently open; fine for internal/self-host)
+
+## Licensing & note
+MIT. The NSA/OWASP classifications are high-level naming, not formal assessment
+certs — never claim compliance without an actual auditor's sign-off.
